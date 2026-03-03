@@ -9,119 +9,173 @@ const {
 
 const { createTranscript } = require("discord-html-transcripts");
 
-const SUPPORT_PANEL_ID = "1470136541715103967";
-const MIDDLEMAN_PANEL_ID = "1461697151443665042";
-
+const SUPPORT_CHANNEL_ID = "1470136541715103967";
 const TICKETS_CATEGORY_ID = "1470412075162534114";
-
 const STAFF_ROLE_ID = "1462447685448630332";
-const MIDDLEMAN_ROLE_ID = "1470405079613050951";
-
 const LOG_CHANNEL_ID = "1470143249720279164";
 
 const intakeSessions = new Map();
 const callCooldown = new Map();
 
-// ================= QUESTIONS =================
-
 const QUESTIONS = {
   general: [
     "🆘 מה הבעיה שלך?",
     "📌 מה ניסית כבר לעשות?",
-    "📎 יש הוכחות?"
+    "📎 יש הוכחות / תמונות?"
   ],
   bug: [
     "🐞 מה הבאג?",
     "🕒 מתי זה קרה?",
-    "📍 איפה זה קרה?"
+    "📍 איפה זה קרה?",
+    "🔁 זה קורה תמיד?"
   ],
   staff: [
     "👮 על איזה איש צוות מדובר?",
-    "📌 מה קרה?",
+    "📌 מה בדיוק קרה?",
+    "🕒 מתי זה קרה?",
     "📎 יש הוכחות?"
   ],
   base: [
     "🏠 איזה בייס תרצה?",
-    "💰 יש לך פיקדון?"
+    "💰 יש לך פיקדון?",
+    "📅 מתי תרצה לקבל?"
   ],
   other: [
     "📝 מה הנושא?",
     "📌 תסביר בפירוט."
-  ],
-  middleman: [
-    "💰 מה אתה מציע בעסקה?",
-    "🤝 מה הצד השני מציע?"
   ]
 };
 
 function registerTicketSystem(client) {
 
-  // ================= CREATE PANELS =================
-
+  // ================= PANEL =================
   client.once("ready", async () => {
-
-    // רגיל
-    await createPanel(client, SUPPORT_PANEL_ID, false);
-
-    // מידלמן
-    await createPanel(client, MIDDLEMAN_PANEL_ID, true);
-
-  });
-
-  async function createPanel(client, channelId, isMiddleman) {
-    const channel = await client.channels.fetch(channelId).catch(() => null);
+    const channel = await client.channels.fetch(SUPPORT_CHANNEL_ID).catch(() => null);
     if (!channel) return;
 
     const messages = await channel.messages.fetch({ limit: 20 });
     const exists = messages.find(m =>
-      m.components?.[0]?.components?.some(c =>
-        c.customId?.startsWith(isMiddleman ? "open_middleman" : "open_ticket")
-      )
+      m.components?.[0]?.components?.some(c => c.customId?.startsWith("open_ticket_"))
     );
+
     if (exists) return;
 
     const embed = new EmbedBuilder()
-      .setColor(isMiddleman ? 0xff9900 : 0x00c8ff)
-      .setTitle(isMiddleman ? "💼 מערכת מידלמן" : "🎫 מערכת טיקטים")
+      .setColor(0x00c8ff)
+      .setTitle("🎫 מערכת טיקטים מתקדמת")
       .setDescription(
-        isMiddleman
-          ? "פתח טיקט מידלמן בצורה בטוחה ומאובטחת."
-          : "פתח טיקט ותשלים שאלון קצר לפני שהצוות יראה."
+        "ברוכים הבאים למערכת התמיכה החדשה שלנו.\n\n" +
+        "📌 פתח טיקט ובצע שאלון קצר\n" +
+        "👮 הצוות יראה את הטיקט רק לאחר סיום השאלון\n\n" +
+        "━━━━━━━━━━━━━━━━━━━━"
       )
-      .setFooter({ text: "Frogixx System" });
+      .setFooter({ text: "Frogixx Advanced Ticket System" });
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
-        .setCustomId(isMiddleman ? "open_middleman" : "open_ticket_general")
-        .setLabel(isMiddleman ? "פתח טיקט מידלמן" : "פתח טיקט")
-        .setStyle(ButtonStyle.Primary)
+        .setCustomId("open_ticket_general")
+        .setLabel("עזרה כללית")
+        .setEmoji("🆘")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("open_ticket_bug")
+        .setLabel("דיווח באג")
+        .setEmoji("🐞")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("open_ticket_staff")
+        .setLabel("תלונה על צוות")
+        .setEmoji("👮")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("open_ticket_base")
+        .setLabel("הזמנת בייס")
+        .setEmoji("🏠")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("open_ticket_other")
+        .setLabel("אחר")
+        .setEmoji("📝")
+        .setStyle(ButtonStyle.Secondary)
     );
 
     await channel.send({ embeds: [embed], components: [row] });
-  }
+  });
 
-  // ================= BUTTONS =================
-
+  // ================= INTERACTIONS =================
   client.on("interactionCreate", async interaction => {
 
     if (!interaction.isButton()) return;
 
-    // ===== OPEN MIDDLEMAN =====
-    if (interaction.customId === "open_middleman") {
-      return openTicket(interaction, "middleman", true);
-    }
-
-    // ===== OPEN NORMAL =====
+    // ===== OPEN =====
     if (interaction.customId.startsWith("open_ticket_")) {
+
       const type = interaction.customId.replace("open_ticket_", "");
-      return openTicket(interaction, type, false);
+
+      const channel = await interaction.guild.channels.create({
+        name: `ticket-${interaction.user.username}`,
+        type: ChannelType.GuildText,
+        parent: TICKETS_CATEGORY_ID,
+        permissionOverwrites: [
+          { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+          { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+          { id: STAFF_ROLE_ID, deny: [PermissionFlagsBits.ViewChannel] }
+        ]
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x2f3136)
+        .setTitle("🎫 טיקט נפתח בהצלחה")
+        .setDescription(
+          `👤 נפתח על ידי: <@${interaction.user.id}>\n` +
+          `📌 סוג: ${type}\n\n` +
+          "📝 אנא השלם את השאלון למטה.\n\n" +
+          "━━━━━━━━━━━━━━━━━━━━"
+        );
+
+      const controls = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("claim_ticket")
+          .setLabel("קח טיקט")
+          .setEmoji("🧑‍✈️")
+          .setStyle(ButtonStyle.Success),
+        new ButtonBuilder()
+          .setCustomId("close_ticket")
+          .setLabel("סגור טיקט")
+          .setEmoji("🔒")
+          .setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+          .setCustomId("member_options")
+          .setLabel("אפשרויות ממבר")
+          .setEmoji("⚙️")
+          .setStyle(ButtonStyle.Secondary)
+      );
+
+      await channel.send({ embeds: [embed], components: [controls] });
+
+      intakeSessions.set(channel.id, {
+        userId: interaction.user.id,
+        type,
+        step: 0,
+        answers: []
+      });
+
+      await channel.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0x00bfff)
+            .setTitle("📝 שאלה 1")
+            .setDescription(QUESTIONS[type][0])
+        ]
+      });
+
+      return interaction.reply({ content: `✅ הטיקט נפתח: ${channel}`, ephemeral: true });
     }
 
     // ===== MEMBER OPTIONS =====
     if (interaction.customId === "member_options") {
 
-      const session = intakeSessions.get(interaction.channel.id);
-      if (!session) return;
+      if (!intakeSessions.get(interaction.channel.id)) return;
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -134,16 +188,15 @@ function registerTicketSystem(client) {
           .setStyle(ButtonStyle.Danger)
       );
 
-      return interaction.reply({ content: "בחר אפשרות:", components: [row], ephemeral: true });
+      return interaction.reply({
+        content: "בחר אפשרות:",
+        components: [row],
+        ephemeral: true
+      });
     }
 
-    // ===== CALL =====
+    // ===== CALL STAFF =====
     if (interaction.customId === "call_staff") {
-
-      const session = intakeSessions.get(interaction.channel.id);
-      if (!session) return;
-
-      const role = session.isMiddleman ? MIDDLEMAN_ROLE_ID : STAFF_ROLE_ID;
 
       const last = callCooldown.get(interaction.user.id);
       if (last && Date.now() - last < 300000)
@@ -151,32 +204,41 @@ function registerTicketSystem(client) {
 
       callCooldown.set(interaction.user.id, Date.now());
 
-      await interaction.channel.send(`<@${interaction.user.id}> מבקש צוות\n<@&${role}>`);
+      await interaction.channel.send(
+        `📢 <@${interaction.user.id}> מבקש צוות!\n<@&${STAFF_ROLE_ID}>`
+      );
 
       return interaction.reply({ content: "✅ הצוות תוייג.", ephemeral: true });
+    }
+
+    // ===== REQUEST CLOSE =====
+    if (interaction.customId === "request_close") {
+      await interaction.channel.send(
+        `🔔 <@${interaction.user.id}> מבקש לסגור את הטיקט.\n<@&${STAFF_ROLE_ID}>`
+      );
+      return interaction.reply({ content: "✅ הבקשה נשלחה.", ephemeral: true });
     }
 
     // ===== CLAIM =====
     if (interaction.customId === "claim_ticket") {
 
-      const session = intakeSessions.get(interaction.channel.id);
-      if (!session) return;
+      if (!interaction.member.roles.cache.has(STAFF_ROLE_ID))
+        return interaction.reply({ content: "❌ רק צוות.", ephemeral: true });
 
-      const role = session.isMiddleman ? MIDDLEMAN_ROLE_ID : STAFF_ROLE_ID;
-
-      if (!interaction.member.roles.cache.has(role))
-        return interaction.reply({ content: "❌ רק צוות מתאים יכול לקחת.", ephemeral: true });
-
-      await interaction.channel.send(`🧑‍✈️ נלקח על ידי <@${interaction.user.id}>`);
+      await interaction.channel.send(`🧑‍✈️ הטיקט נלקח על ידי <@${interaction.user.id}>`);
       return interaction.reply({ content: "✅ לקחת.", ephemeral: true });
     }
 
     // ===== CLOSE =====
     if (interaction.customId === "close_ticket") {
 
+      if (!interaction.member.roles.cache.has(STAFF_ROLE_ID))
+        return interaction.reply({ content: "❌ רק צוות.", ephemeral: true });
+
       await interaction.channel.send("⚠️ במידה ולא תשלח הודעה ב-5 שניות הקרובות הטיקט ייסגר.");
 
       const collector = interaction.channel.createMessageCollector({ time: 5000 });
+
       let canceled = false;
 
       collector.on("collect", () => {
@@ -206,67 +268,7 @@ function registerTicketSystem(client) {
 
   });
 
-  // ================= OPEN FUNCTION =================
-
-  async function openTicket(interaction, type, isMiddleman) {
-
-    const role = isMiddleman ? MIDDLEMAN_ROLE_ID : STAFF_ROLE_ID;
-
-    const channel = await interaction.guild.channels.create({
-      name: `${type}-${interaction.user.username}`,
-      type: ChannelType.GuildText,
-      parent: TICKETS_CATEGORY_ID,
-      permissionOverwrites: [
-        { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-        { id: role, deny: [PermissionFlagsBits.ViewChannel] }
-      ]
-    });
-
-    const embed = new EmbedBuilder()
-      .setColor(isMiddleman ? 0xff9900 : 0x2f3136)
-      .setTitle(isMiddleman ? "💼 טיקט מידלמן" : "🎫 טיקט חדש")
-      .setDescription("📝 אנא השלם את השאלון למטה.\n\n━━━━━━━━━━━━━━━━━━━━");
-
-    const controls = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("claim_ticket")
-        .setLabel("קח טיקט")
-        .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId("close_ticket")
-        .setLabel("סגור טיקט")
-        .setStyle(ButtonStyle.Danger),
-      new ButtonBuilder()
-        .setCustomId("member_options")
-        .setLabel("אפשרויות ממבר")
-        .setStyle(ButtonStyle.Secondary)
-    );
-
-    await channel.send({ embeds: [embed], components: [controls] });
-
-    intakeSessions.set(channel.id, {
-      userId: interaction.user.id,
-      type,
-      step: 0,
-      answers: [],
-      isMiddleman
-    });
-
-    await channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor(0x00bfff)
-          .setTitle("📝 שאלה 1")
-          .setDescription(QUESTIONS[type][0])
-      ]
-    });
-
-    await interaction.reply({ content: `✅ נפתח: ${channel}`, ephemeral: true });
-  }
-
   // ================= QUESTION FLOW =================
-
   client.on("messageCreate", async message => {
 
     if (!message.guild || message.author.bot) return;
@@ -282,9 +284,7 @@ function registerTicketSystem(client) {
 
     if (session.step >= questions.length) {
 
-      const role = session.isMiddleman ? MIDDLEMAN_ROLE_ID : STAFF_ROLE_ID;
-
-      await message.channel.permissionOverwrites.edit(role, {
+      await message.channel.permissionOverwrites.edit(STAFF_ROLE_ID, {
         ViewChannel: true,
         SendMessages: true
       });
@@ -295,7 +295,7 @@ function registerTicketSystem(client) {
       }
 
       await message.channel.send({
-        content: `<@&${role}>`,
+        content: `<@&${STAFF_ROLE_ID}>`,
         embeds: [
           new EmbedBuilder()
             .setColor(0x00ff88)
