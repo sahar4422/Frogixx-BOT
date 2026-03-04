@@ -56,21 +56,34 @@ async function updateStaffTable(client){
 const guild = client.guilds.cache.first();
 const role = guild.roles.cache.get(STAFF_ROLE_ID);
 
-let description = "";
+let staffArray=[];
 
 role.members.forEach(member=>{
 
 const count = staffStats.get(member.id) || 0;
 
-description += `👮 ${member.user.tag} — **${count} טיקטים**\n`;
+staffArray.push({
+id:member.id,
+count
+});
+
+});
+
+staffArray.sort((a,b)=>b.count-a.count);
+
+let description="";
+
+staffArray.forEach((staff,i)=>{
+
+description += `**${i+1}.** <@${staff.id}> — **${staff.count} טיקטים**\n`;
 
 });
 
 const embed = new EmbedBuilder()
 .setColor("#00bfff")
-.setTitle("📊 סטטיסטיקת צוות טיקטים")
+.setTitle("📊 טבלת צוות טיקטים")
 .setDescription(description || "אין נתונים עדיין")
-.setFooter({text:"Frogixx Ticket Analytics"})
+.setFooter({text:"Frogixx Staff Analytics"})
 .setTimestamp();
 
 const channel = await client.channels.fetch(TABLE_CHANNEL_ID);
@@ -230,16 +243,22 @@ const row = new ActionRowBuilder().addComponents(
 new ButtonBuilder()
 .setCustomId("call_staff")
 .setLabel("קריאה לצוות")
+.setEmoji("📢")
 .setStyle(ButtonStyle.Primary),
 
 new ButtonBuilder()
 .setCustomId("request_close")
 .setLabel("בקשת סגירה")
+.setEmoji("🔒")
 .setStyle(ButtonStyle.Danger)
 
 );
 
-return interaction.reply({content:"בחר אפשרות:",components:[row],flags:64});
+return interaction.reply({
+content:"⚙️ אפשרויות ממבר:",
+components:[row],
+flags:64
+});
 
 }
 
@@ -273,22 +292,18 @@ await interaction.channel.send("⚠️ במידה ולא תשלח הודעה ב5
 
 const collector = interaction.channel.createMessageCollector({time:5000});
 
-let cancel = false;
+let cancel=false;
 
 collector.on("collect",()=>{
-
-cancel = true;
+cancel=true;
 collector.stop();
-
 });
 
 collector.on("end",async()=>{
 
 if(cancel){
-
 interaction.channel.send("❌ הסגירה בוטלה.");
 return;
-
 }
 
 const transcript = await createTranscript(interaction.channel);
@@ -335,6 +350,19 @@ message.channel.send(`✅ <@${member.id}> נוסף לטיקט`);
 
 }
 
+if(message.content === "!cleartickets"){
+
+if(!message.member.roles.cache.has(STAFF_ROLE_ID))
+return message.reply("❌ רק צוות.");
+
+staffStats.clear();
+
+updateStaffTable(message.client);
+
+message.channel.send("🧹 טבלת הטיקטים אופסה.");
+
+}
+
 const session = intakeSessions.get(message.channel.id);
 if(!session) return;
 if(message.author.id !== session.userId) return;
@@ -351,7 +379,7 @@ ViewChannel:true,
 SendMessages:true
 });
 
-let summary = "";
+let summary="";
 
 for(let i=0;i<questions.length;i++){
 summary += `**${questions[i]}**\n${session.answers[i]}\n\n`;
