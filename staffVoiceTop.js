@@ -14,23 +14,23 @@ const AFK_CHANNEL_ID = "1466491883642556569";
 
 const FILE_PATH = path.join(__dirname, "staff_voice_time.json");
 
-// Every minute: add time + update embed
 const TICK_INTERVAL_MS = 60 * 1000;
 
 // =====================
-// SECRET COMMANDS (STAFF ONLY)
+// SECRET COMMANDS
 // =====================
 const SECRET_RESET = "!frogresetstaffvoice";
-const SECRET_ADD = "!frogaddvoice"; // !frogaddvoice @user 120 (minutes)
-const SECRET_REMOVE = "!frogremovevoice"; // !frogremovevoice @user 120 (minutes)
-const SECRET_CHECK = "!frogcheckvoice"; // !frogcheckvoice @user
+const SECRET_ADD = "!frogaddvoice";
+const SECRET_REMOVE = "!frogremovevoice";
+const SECRET_CHECK = "!frogcheckvoice";
 
 // =====================
 // JSON HELPERS
 // =====================
 function readJsonSafe() {
   try {
-    if (!fs.existsSync(FILE_PATH)) fs.writeFileSync(FILE_PATH, JSON.stringify({}, null, 2));
+    if (!fs.existsSync(FILE_PATH))
+      fs.writeFileSync(FILE_PATH, JSON.stringify({}, null, 2));
     const raw = fs.readFileSync(FILE_PATH, "utf8");
     if (!raw || raw.trim() === "") return {};
     return JSON.parse(raw);
@@ -46,7 +46,7 @@ function writeJsonSafe(data) {
 }
 
 // =====================
-// TIME FORMAT (ENGLISH)
+// FORMAT TIME
 // =====================
 function formatSecondsEnglish(seconds) {
   const total = Math.max(0, Math.floor(seconds));
@@ -74,70 +74,54 @@ function isValidVoiceChannelId(channelId) {
 }
 
 // =====================
-// GLOBALS
-// =====================
-let data = readJsonSafe(); // { userId: seconds }
+let data = readJsonSafe();
 let lastTopMessageId = null;
 
-// staff currently in voice (NOT AFK)
 const activeInVoice = new Map();
-// userId -> { lastTick: timestampMs }
 
 // =====================
 // ADD TIME
 // =====================
 function addSeconds(userId, secondsToAdd) {
-  if (!userId) return;
-  if (!secondsToAdd || secondsToAdd <= 0) return;
-
-  data = readJsonSafe();
-
   if (!data[userId]) data[userId] = 0;
   data[userId] = Number(data[userId]) + secondsToAdd;
-
   writeJsonSafe(data);
 }
 
 // =====================
-// BUILD EMBED (TOP + ALL STAFF)
+// BUILD EMBED
 // =====================
 async function buildTopEmbed(guild) {
   data = readJsonSafe();
 
-  // fetch all members
   const members = await guild.members.fetch().catch(() => null);
   if (!members) return null;
 
   const staffMembers = members.filter((m) => !m.user.bot && isStaff(m));
 
-  // build list of ALL staff even if 0
   const arr = [];
   for (const member of staffMembers.values()) {
     const seconds = Number(data[member.id]) || 0;
     arr.push({ userId: member.id, seconds });
   }
 
-  // sort
   arr.sort((a, b) => b.seconds - a.seconds);
-
-const top10 = arr;
 
   const embed = new EmbedBuilder()
     .setColor(0xffcc00)
     .setTitle("🎧 Staff Voice Top (Live)")
     .setDescription(
-      "📌 מתעדכן כל ** דקה **\n" +
-        "🚫 בשיחת AFK הזמן לא נחשב\n" +
-        "👮 הטבלה היא רק של ** צוות **\n\n" +
-        "━━━━━━━━━━━━━━━━━━━━"
+      "📌 מתעדכן כל **דקה**\n" +
+        "🚫 AFK לא נספר\n" +
+        "👮 רק צוות\n\n━━━━━━━━━━━━━━━━━━━━"
     )
     .setFooter({ text: "Frogixx • Staff Voice Tracker" })
     .setTimestamp();
 
-  // TOP 10
   let topText = "";
-  for (let i = 0; i < top10.length; i++) {
-    const u = top10[i];
+
+  for (let i = 0; i < arr.length; i++) {
+    const u = arr[i];
     const place = i + 1;
 
     const icon =
@@ -148,28 +132,9 @@ const top10 = arr;
     )}**\n`;
   }
 
-embed.addFields({ name: "🏆 Staff Top (All)", value: topText || "No staff found." });
-
-  // LIVE STAFF
-  const liveStaff = [...activeInVoice.keys()];
-  if (liveStaff.length > 0) {
-    const show = liveStaff.slice(0, 20).map((id) => `<@${id}>`).join(" • ");
-    embed.addFields({
-      name: "🟢 Live Staff in Voice",
-      value: show,
-    });
-  } else {
-    embed.addFields({
-      name: "🟢 Live Staff in Voice",
-      value: "No staff members are in voice right now.",
-    });
-  }
-
-  // STAFF COUNT
   embed.addFields({
-    name: "👮 Total Staff Members",
-    value: `${staffMembers.size}`,
-    inline: true,
+    name: "🏆 Staff Top",
+    value: topText || "No data yet."
   });
 
   return embed;
@@ -185,51 +150,36 @@ async function updateTopMessage(client) {
   const embed = await buildTopEmbed(channel.guild);
   if (!embed) return;
 
-  // find existing message if we don't have it
   if (!lastTopMessageId) {
-    const messages = await channel.messages.fetch({ limit: 15 }).catch(() => null);
-    if (messages) {
-      const existing = messages.find(
-        (m) =>
-          m.author?.id === client.user.id &&
-          m.embeds?.[0]?.title?.includes("Staff Voice Top")
-      );
-      if (existing) lastTopMessageId = existing.id;
-    }
+    const messages = await channel.messages.fetch({ limit: 10 });
+    const existing = messages.find(
+      (m) =>
+        m.author.id === client.user.id &&
+        m.embeds?.[0]?.title?.includes("Staff Voice Top")
+    );
+
+    if (existing) lastTopMessageId = existing.id;
   }
 
-  // edit existing
   if (lastTopMessageId) {
     const msg = await channel.messages.fetch(lastTopMessageId).catch(() => null);
-
-    // if deleted -> reset and send new
-    if (!msg) {
-      lastTopMessageId = null;
-    } else {
-      await msg.edit({ embeds: [embed] }).catch(() => {});
+    if (msg) {
+      await msg.edit({ embeds: [embed] });
       return;
     }
   }
 
-  // send new
-  const sent = await channel.send({ embeds: [embed] }).catch(() => null);
-  if (sent) lastTopMessageId = sent.id;
+  const sent = await channel.send({ embeds: [embed] });
+  lastTopMessageId = sent.id;
 }
 
 // =====================
-// EVERY MINUTE TICK
+// EVERY MINUTE
 // =====================
 async function minuteTick(client) {
   try {
-    // Adds +60 seconds for everyone currently in voice (not AFK)
-    for (const [userId, info] of activeInVoice.entries()) {
-      const now = Date.now();
-      const diffSeconds = Math.floor((now - info.lastTick) / 1000);
-
-      if (diffSeconds >= 30) {
-        addSeconds(userId, 60);
-        activeInVoice.set(userId, { lastTick: now });
-      }
+    for (const userId of activeInVoice.keys()) {
+      addSeconds(userId, 60);
     }
 
     await updateTopMessage(client);
@@ -237,21 +187,17 @@ async function minuteTick(client) {
 }
 
 // =====================
-// VOICE TRACKING
+// VOICE TRACK
 // =====================
 async function handleVoice(oldState, newState) {
   try {
     const member = newState.member || oldState.member;
-    if (!member) return;
-    if (member.user.bot) return;
+    if (!member || member.user.bot) return;
 
-    // only staff
     if (!isStaff(member)) {
       activeInVoice.delete(member.id);
       return;
     }
-
-    const userId = member.id;
 
     const oldId = oldState.channelId;
     const newId = newState.channelId;
@@ -259,155 +205,110 @@ async function handleVoice(oldState, newState) {
     const oldValid = isValidVoiceChannelId(oldId);
     const newValid = isValidVoiceChannelId(newId);
 
-    // joined valid voice
     if (!oldValid && newValid) {
-      activeInVoice.set(userId, { lastTick: Date.now() });
+      activeInVoice.set(member.id, true);
       return;
     }
 
-    // left valid voice
     if (oldValid && !newValid) {
-      activeInVoice.delete(userId);
+      activeInVoice.delete(member.id);
       return;
     }
 
-    // moved
-    if (oldId !== newId) {
-      // moved into AFK
-      if (newId === AFK_CHANNEL_ID) {
-        activeInVoice.delete(userId);
-        return;
-      }
-
-      // moved from AFK into valid voice
-      if (oldId === AFK_CHANNEL_ID && newValid) {
-        activeInVoice.set(userId, { lastTick: Date.now() });
-        return;
-      }
-
-      // moved between valid voices - keep tracking
-      if (oldValid && newValid) return;
-    }
   } catch {}
 }
 
 // =====================
-// SCAN ACTIVE VOICE ON START / AFTER RESET
+// RESET SUMMARY
 // =====================
-async function scanWhoIsInVoice(client) {
-  try {
-    const guild = client.guilds.cache.get(GUILD_ID);
-    if (!guild) return;
+function buildResetSummary() {
+  const arr = Object.entries(data).map(([id, seconds]) => ({
+    id,
+    seconds
+  }));
 
-    const members = await guild.members.fetch().catch(() => null);
-    if (!members) return;
+  arr.sort((a, b) => b.seconds - a.seconds);
 
-    members.forEach((member) => {
-      if (member.user.bot) return;
-      if (!isStaff(member)) return;
+  const total = arr.reduce((sum, u) => sum + u.seconds, 0);
 
-      const vc = member.voice.channelId;
+  const embed = new EmbedBuilder()
+    .setColor(0xff4444)
+    .setTitle("📊 Staff Voice Summary Before Reset")
+    .setTimestamp();
 
-      if (vc && vc !== AFK_CHANNEL_ID) {
-        activeInVoice.set(member.id, { lastTick: Date.now() });
-      }
+  if (arr[0])
+    embed.addFields({
+      name: "🥇 Most Active",
+      value: `<@${arr[0].id}> — ${formatSecondsEnglish(arr[0].seconds)}`
     });
-  } catch {}
+
+  if (arr[1])
+    embed.addFields({
+      name: "🥈 Second Place",
+      value: `<@${arr[1].id}> — ${formatSecondsEnglish(arr[1].seconds)}`
+    });
+
+  if (arr[2])
+    embed.addFields({
+      name: "🥉 Third Place",
+      value: `<@${arr[2].id}> — ${formatSecondsEnglish(arr[2].seconds)}`
+    });
+
+  embed.addFields({
+    name: "📊 Total Staff Voice",
+    value: formatSecondsEnglish(total)
+  });
+
+  return embed;
 }
 
 // =====================
-// SECRET COMMANDS
+// COMMANDS
 // =====================
 async function handleSecretCommands(client, message) {
-  try {
-    if (!message.guild) return;
-    if (message.author.bot) return;
+  if (!message.guild || message.author.bot) return;
+  if (!message.member.roles.cache.has(STAFF_ROLE_ID)) return;
 
-    // staff only
-    if (!message.member.roles.cache.has(STAFF_ROLE_ID)) return;
+  const args = message.content.split(" ");
+  const cmd = args[0];
 
-    const args = message.content.trim().split(/\s+/);
-    const cmd = args[0];
+  if (cmd === SECRET_RESET) {
 
-    // RESET
-    if (cmd === SECRET_RESET) {
-      writeJsonSafe({});
-      data = {};
+    const embed = buildResetSummary();
+    await message.channel.send({ embeds: [embed] });
 
-      // חשוב: לא מנקים לגמרי, אלא עושים סריקה מחדש
-      activeInVoice.clear();
-      await scanWhoIsInVoice(client);
+    writeJsonSafe({});
+    data = {};
 
-      await message.reply("✅ Staff voice time has been reset!");
-      await updateTopMessage(client);
-      return;
-    }
+    activeInVoice.clear();
 
-    // CHECK
-    if (cmd === SECRET_CHECK) {
-      const user = message.mentions.users.first();
-      if (!user) return message.reply("❌ Usage: `!frogcheckvoice @user`");
+    await message.reply("✅ Staff voice time has been reset!");
+    await updateTopMessage(client);
+  }
 
-      data = readJsonSafe();
-      const seconds = Number(data[user.id]) || 0;
+  if (cmd === SECRET_CHECK) {
+    const user = message.mentions.users.first();
+    if (!user) return;
 
-      return message.reply(`🎧 <@${user.id}> has: **${formatSecondsEnglish(seconds)}**`);
-    }
+    const seconds = Number(data[user.id]) || 0;
 
-    // ADD
-    if (cmd === SECRET_ADD) {
-      const user = message.mentions.users.first();
-      const minutes = Number(args[2]);
-
-      if (!user || !minutes || minutes <= 0) {
-        return message.reply("❌ Usage: `!frogaddvoice @user 120` (minutes)");
-      }
-
-      addSeconds(user.id, Math.floor(minutes * 60));
-      await message.reply(`✅ Added **${minutes} minutes** to <@${user.id}> 🎧`);
-      await updateTopMessage(client);
-      return;
-    }
-
-    // REMOVE
-    if (cmd === SECRET_REMOVE) {
-      const user = message.mentions.users.first();
-      const minutes = Number(args[2]);
-
-      if (!user || !minutes || minutes <= 0) {
-        return message.reply("❌ Usage: `!frogremovevoice @user 120` (minutes)");
-      }
-
-      data = readJsonSafe();
-
-      const removeSeconds = Math.floor(minutes * 60);
-      const current = Number(data[user.id]) || 0;
-
-      data[user.id] = Math.max(0, current - removeSeconds);
-      writeJsonSafe(data);
-
-      await message.reply(`✅ Removed **${minutes} minutes** from <@${user.id}> 🎧`);
-      await updateTopMessage(client);
-      return;
-    }
-  } catch {}
+    message.reply(
+      `🎧 <@${user.id}> has **${formatSecondsEnglish(seconds)}**`
+    );
+  }
 }
 
 // =====================
 // REGISTER
 // =====================
 function registerStaffVoiceTop(client) {
+
   client.once("ready", async () => {
-    console.log("✅ Staff Voice Top LIVE loaded!");
 
-    // scan who is already in voice
-    await scanWhoIsInVoice(client);
-
-    // update first time
     await updateTopMessage(client);
 
-    // every minute: add time + update
     setInterval(() => minuteTick(client), TICK_INTERVAL_MS);
+
   });
 
   client.on("voiceStateUpdate", async (oldState, newState) => {
@@ -417,6 +318,7 @@ function registerStaffVoiceTop(client) {
   client.on("messageCreate", async (message) => {
     await handleSecretCommands(client, message);
   });
+
 }
 
 module.exports = { registerStaffVoiceTop };
