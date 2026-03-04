@@ -17,6 +17,11 @@ const LOG_CHANNEL_ID = "1470143249720279164";
 const intakeSessions = new Map();
 const callCooldown = new Map();
 
+const ticketOwners = new Map();
+const staffStats = new Map();
+
+let ticketCounter = 1;
+
 const QUESTIONS = {
   general: [
     "🆘 מה הבעיה שלך?",
@@ -48,12 +53,14 @@ const QUESTIONS = {
 
 function registerTicketSystem(client) {
 
-  // ================= PANEL =================
-  client.once("ready", async () => {
+  // PANEL
+  client.once("clientReady", async () => {
+
     const channel = await client.channels.fetch(SUPPORT_CHANNEL_ID).catch(() => null);
     if (!channel) return;
 
     const messages = await channel.messages.fetch({ limit: 20 });
+
     const exists = messages.find(m =>
       m.components?.[0]?.components?.some(c => c.customId?.startsWith("open_ticket_"))
     );
@@ -100,20 +107,30 @@ function registerTicketSystem(client) {
     );
 
     await channel.send({ embeds: [embed], components: [row] });
+
   });
 
-  // ================= INTERACTIONS =================
+  // INTERACTIONS
   client.on("interactionCreate", async interaction => {
 
     if (!interaction.isButton()) return;
 
-    // ===== OPEN =====
     if (interaction.customId.startsWith("open_ticket_")) {
+
+      const existing = interaction.guild.channels.cache.find(
+        c => c.name.includes(interaction.user.id)
+      );
+
+      if (existing)
+        return interaction.reply({
+          content: `❌ כבר יש לך טיקט פתוח: ${existing}`,
+          flags: 64
+        });
 
       const type = interaction.customId.replace("open_ticket_", "");
 
       const channel = await interaction.guild.channels.create({
-        name: `ticket-${interaction.user.username}`,
+        name: `ticket-${ticketCounter}-${interaction.user.id}`,
         type: ChannelType.GuildText,
         parent: TICKETS_CATEGORY_ID,
         permissionOverwrites: [
@@ -122,6 +139,9 @@ function registerTicketSystem(client) {
           { id: STAFF_ROLE_ID, deny: [PermissionFlagsBits.ViewChannel] }
         ]
       });
+
+      ticketOwners.set(channel.id, interaction.user.id);
+      ticketCounter++;
 
       const embed = new EmbedBuilder()
         .setColor(0x2f3136)
@@ -169,109 +189,53 @@ function registerTicketSystem(client) {
         ]
       });
 
-      return interaction.reply({ content: `✅ הטיקט נפתח: ${channel}`, ephemeral: true });
+      return interaction.reply({ content: `✅ הטיקט נפתח: ${channel}`, flags: 64 });
+
     }
 
-    // ===== MEMBER OPTIONS =====
-    if (interaction.customId === "member_options") {
-
-      if (!intakeSessions.get(interaction.channel.id)) return;
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId("call_staff")
-          .setLabel("קריאה לצוות")
-          .setStyle(ButtonStyle.Primary),
-        new ButtonBuilder()
-          .setCustomId("request_close")
-          .setLabel("בקשת סגירה")
-          .setStyle(ButtonStyle.Danger)
-      );
-
-      return interaction.reply({
-        content: "בחר אפשרות:",
-        components: [row],
-        ephemeral: true
-      });
-    }
-
-    // ===== CALL STAFF =====
-    if (interaction.customId === "call_staff") {
-
-      const last = callCooldown.get(interaction.user.id);
-      if (last && Date.now() - last < 300000)
-        return interaction.reply({ content: "⏳ ניתן לקרוא לצוות פעם ב-5 דקות.", ephemeral: true });
-
-      callCooldown.set(interaction.user.id, Date.now());
-
-      await interaction.channel.send(
-        `📢 <@${interaction.user.id}> מבקש צוות!\n<@&${STAFF_ROLE_ID}>`
-      );
-
-      return interaction.reply({ content: "✅ הצוות תוייג.", ephemeral: true });
-    }
-
-    // ===== REQUEST CLOSE =====
-    if (interaction.customId === "request_close") {
-      await interaction.channel.send(
-        `🔔 <@${interaction.user.id}> מבקש לסגור את הטיקט.\n<@&${STAFF_ROLE_ID}>`
-      );
-      return interaction.reply({ content: "✅ הבקשה נשלחה.", ephemeral: true });
-    }
-
-    // ===== CLAIM =====
+    // CLAIM
     if (interaction.customId === "claim_ticket") {
 
       if (!interaction.member.roles.cache.has(STAFF_ROLE_ID))
-        return interaction.reply({ content: "❌ רק צוות.", ephemeral: true });
+        return interaction.reply({ content: "❌ רק צוות.", flags: 64 });
+
+      const count = staffStats.get(interaction.user.id) || 0;
+      staffStats.set(interaction.user.id, count + 1);
 
       await interaction.channel.send(`🧑‍✈️ הטיקט נלקח על ידי <@${interaction.user.id}>`);
-      return interaction.reply({ content: "✅ לקחת.", ephemeral: true });
-    }
+      return interaction.reply({ content: "✅ לקחת.", flags: 64 });
 
-    // ===== CLOSE =====
-    if (interaction.customId === "close_ticket") {
-
-      if (!interaction.member.roles.cache.has(STAFF_ROLE_ID))
-        return interaction.reply({ content: "❌ רק צוות.", ephemeral: true });
-
-      await interaction.channel.send("⚠️ במידה ולא תשלח הודעה ב-5 שניות הקרובות הטיקט ייסגר.");
-
-      const collector = interaction.channel.createMessageCollector({ time: 5000 });
-
-      let canceled = false;
-
-      collector.on("collect", () => {
-        canceled = true;
-        collector.stop();
-      });
-
-      collector.on("end", async () => {
-
-        if (canceled) {
-          interaction.channel.send("❌ הסגירה בוטלה.");
-          return;
-        }
-
-        const transcript = await createTranscript(interaction.channel);
-
-        const log = await interaction.guild.channels.fetch(LOG_CHANNEL_ID);
-
-        await log.send({
-          content: `🔒 טיקט נסגר על ידי <@${interaction.user.id}>`,
-          files: [transcript]
-        });
-
-        await interaction.channel.delete();
-      });
     }
 
   });
 
-  // ================= QUESTION FLOW =================
+  // MESSAGE EVENTS
   client.on("messageCreate", async message => {
 
     if (!message.guild || message.author.bot) return;
+
+    // !add
+    if (message.content.startsWith("!add")) {
+
+      if (!message.member.roles.cache.has(STAFF_ROLE_ID))
+        return message.reply("❌ רק צוות.");
+
+      const args = message.content.split(" ");
+      const userId = args[1];
+
+      if (!userId) return message.reply("❌ שימוש: !add USERID");
+
+      const member = await message.guild.members.fetch(userId).catch(() => null);
+      if (!member) return message.reply("❌ משתמש לא נמצא.");
+
+      await message.channel.permissionOverwrites.edit(member.id, {
+        ViewChannel: true,
+        SendMessages: true
+      });
+
+      message.channel.send(`✅ <@${member.id}> נוסף לטיקט.`);
+
+    }
 
     const session = intakeSessions.get(message.channel.id);
     if (!session) return;
@@ -306,6 +270,7 @@ function registerTicketSystem(client) {
 
       intakeSessions.delete(message.channel.id);
       return;
+
     }
 
     await message.channel.send({
