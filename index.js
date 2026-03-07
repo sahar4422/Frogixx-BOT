@@ -10,6 +10,7 @@ const { registerTicketSystem } = require("./ticketsV2");
 const { registerGiveawaySystem } = require("./giveaways");
 const { registerLogsV2 } = require("./logsV2");
 const { registerMiddlemanSystem } = require("./middlemanTickets");
+const { registerReactionRoles } = require("./reactionRoles");
 const { registerBackupSystem } = require("./backup");
 const { registerClearCommand } = require("./clear");
 const { registerStaffVoiceTop } = require("./staffVoiceTop");
@@ -53,6 +54,7 @@ client.once("clientReady", async () => {
 registerTicketSystem(client);
 registerGiveawaySystem(client);
 registerLogsV2(client);
+registerReactionRoles(client);
 registerBackupSystem(client);
 registerMiddlemanSystem(client);
 registerClearCommand(client);
