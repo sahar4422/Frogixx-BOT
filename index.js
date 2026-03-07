@@ -9,6 +9,7 @@ const { Client, GatewayIntentBits, Partials, EmbedBuilder } = require("discord.j
 const { registerTicketSystem } = require("./ticketsV2");
 const { registerGiveawaySystem } = require("./giveaways");
 const { registerLogsV2 } = require("./logsV2");
+const { registerBroadcast } = require("./broadcast");
 const { registerMiddlemanSystem } = require("./middlemanTickets");
 const { registerReactionRoles } = require("./reactionRoles");
 const { registerBackupSystem } = require("./backup");
@@ -57,6 +58,7 @@ registerLogsV2(client);
 registerReactionRoles(client);
 registerBackupSystem(client);
 registerMiddlemanSystem(client);
+registerBroadcast(client);
 registerClearCommand(client);
 registerStaffVoiceTop(client);
 registerTempRoleSystem(client);
