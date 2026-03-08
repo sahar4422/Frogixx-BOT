@@ -173,7 +173,8 @@ return embed;
 
 async function update(client){
 
-const channel = await client.channels.fetch(CHANNEL_ID).catch(()=>null);
+const channel = await client.channels.fetch(CHANNEL_ID).catch(() => null);
+if (!channel) return;
 
 if(!channel) return;
 
@@ -349,7 +350,7 @@ await update(client);
 
 function registerStaffVoiceTable(client){
 
-client.once("ready",async()=>{
+client.once("clientReady", () => {
 
 console.log("✅ Staff Voice Table Loaded");
 
